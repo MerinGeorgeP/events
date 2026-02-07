@@ -3,23 +3,24 @@ import sqlite3
 import os
 import uuid
 
-# ================= CONFIG =================
+# ==================================================
+# CONFIG
+# ==================================================
 st.set_page_config("EventHub", layout="wide")
 
 DB = "eventhub.db"
 POSTERS = "uploads/posters"
-CERTS = "uploads/certificates"
 PROFILE_PICS = "uploads/profile_pics"
 
 os.makedirs(POSTERS, exist_ok=True)
-os.makedirs(CERTS, exist_ok=True)
 os.makedirs(PROFILE_PICS, exist_ok=True)
 
-# ================= DATABASE =================
+# ==================================================
+# DATABASE
+# ==================================================
 conn = sqlite3.connect(DB, check_same_thread=False)
 c = conn.cursor()
 
-# -------- USERS --------
 c.execute("""
 CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,
@@ -31,7 +32,6 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
-# -------- ORGANISERS (THIS WAS MISSING ❗) --------
 c.execute("""
 CREATE TABLE IF NOT EXISTS organisers (
     username TEXT PRIMARY KEY,
@@ -41,7 +41,6 @@ CREATE TABLE IF NOT EXISTS organisers (
 )
 """)
 
-# -------- EVENTS --------
 c.execute("""
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,22 +59,17 @@ CREATE TABLE IF NOT EXISTS events (
 )
 """)
 
-# -------- CERTIFICATES --------
-c.execute("""
-CREATE TABLE IF NOT EXISTS certificates (
-    event_id INTEGER,
-    participant TEXT,
-    file TEXT
-)
-""")
-
 conn.commit()
 
-# ================= SESSION =================
+# ==================================================
+# SESSION INIT
+# ==================================================
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
-# ================= HELPERS =================
+# ==================================================
+# HELPERS
+# ==================================================
 def logout():
     st.session_state.clear()
     st.session_state.page = "login"
@@ -139,7 +133,7 @@ def register_page():
 
     role = st.selectbox("Account Type", ["participant", "organiser"])
 
-    # -------- PARTICIPANT --------
+    # ---------- PARTICIPANT ----------
     if role == "participant":
         name = st.text_input("Full Name")
         college = st.text_input("College Name")
@@ -153,6 +147,10 @@ def register_page():
         )
 
         if st.button("Create Participant Account"):
+            if not all([name, college, username, password]):
+                st.error("Fill all fields")
+                return
+
             c.execute("SELECT 1 FROM users WHERE username=?", (username,))
             if c.fetchone():
                 st.error("Username already exists")
@@ -168,7 +166,7 @@ def register_page():
             st.session_state.page = "login"
             st.rerun()
 
-    # -------- ORGANISER --------
+    # ---------- ORGANISER ----------
     else:
         college = st.text_input("College Name")
         club = st.text_input("Club Name (Username)")
@@ -177,6 +175,10 @@ def register_page():
         password = st.text_input("Password", type="password")
 
         if st.button("Create Organiser Account"):
+            if not all([college, club, desc, password]):
+                st.error("Fill all fields")
+                return
+
             c.execute("SELECT 1 FROM users WHERE username=?", (club,))
             if c.fetchone():
                 st.error("Club already exists")
@@ -241,6 +243,54 @@ def organiser_dashboard():
             st.rerun()
 
 # ==================================================
+# CREATE EVENT PAGE
+# ==================================================
+def create_event_page():
+    st.title("➕ Create New Event")
+
+    if st.button("⬅ Back"):
+        st.session_state.page = "organiser_dashboard"
+        st.rerun()
+
+    name = st.text_input("Event Name")
+    date = st.date_input("Date")
+    time = st.time_input("Time")
+    venue = st.text_input("Venue")
+    poster = st.file_uploader("Event Poster", type=["png","jpg","jpeg"])
+    desc = st.text_area("Description")
+
+    fees = st.selectbox("Fees", ["Free","Paid"])
+    link = st.text_input("Registration Link")
+    level = st.selectbox("Level", ["Beginner","Intermediate","Advanced"])
+    topics = st.multiselect("Topics", ["AI/ML","Web Dev","Cybersecurity","Music","Dance"])
+    points = st.selectbox("Activity Points", ["0","5","10","20"])
+
+    if st.button("Create Event"):
+        poster_path = None
+        if poster:
+            filename = f"{name}_{uuid.uuid4().hex}.png"
+            poster_path = f"{POSTERS}/{filename}"
+            with open(poster_path, "wb") as f:
+                f.write(poster.read())
+
+        c.execute("""
+        INSERT INTO events (
+            organiser,name,date,time,venue,poster,
+            description,fees,reg_link,level,topics,activity_points
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            st.session_state.user[0],
+            name,str(date),str(time),venue,
+            poster_path,desc,fees,link,level,
+            ",".join(topics),points
+        ))
+
+        conn.commit()
+        st.success("Event created")
+        st.session_state.page = "organiser_dashboard"
+        st.rerun()
+
+# ==================================================
 # PARTICIPANT DASHBOARD
 # ==================================================
 def participant_dashboard():
@@ -252,8 +302,8 @@ def participant_dashboard():
             logout()
 
     st.title(f"👋 {st.session_state.user[0]}")
-    c.execute("SELECT * FROM events")
 
+    c.execute("SELECT * FROM events")
     for e in c.fetchall():
         if topic and not any(t in e[11] for t in topic):
             continue
